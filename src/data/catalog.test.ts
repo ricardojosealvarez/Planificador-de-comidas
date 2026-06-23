@@ -42,6 +42,12 @@ describe('loadPublicCatalog', () => {
 });
 
 describe('loadGoogleSheetsCatalog', () => {
+  it('falla si faltan URLs del catálogo privado', async () => {
+    await expect(loadGoogleSheetsCatalog('token', 'api-key', '', '')).rejects.toThrow(
+      'Faltan VITE_RECIPES_CSV_URL y VITE_INGREDIENTS_CSV_URL',
+    );
+  });
+
   it('carga el catálogo desde pestañas privadas de Google Sheets', async () => {
     const fetchMock = vi
       .fn<typeof fetch>()

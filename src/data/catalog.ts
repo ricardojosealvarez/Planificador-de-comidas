@@ -44,7 +44,7 @@ export async function loadGoogleSheetsCatalog(
   ingredientsSheetUrl: string,
 ): Promise<Catalog> {
   if (!recipesSheetUrl || !ingredientsSheetUrl) {
-    return sampleCatalog;
+    throw new Error('Faltan VITE_RECIPES_CSV_URL y VITE_INGREDIENTS_CSV_URL en GitHub Actions');
   }
 
   try {
