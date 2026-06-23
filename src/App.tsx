@@ -10,7 +10,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { appConfig, hasGoogleConfig } from './config';
-import { loadCatalog } from './data/catalog';
+import { loadGoogleSheetsCatalog } from './data/catalog';
 import { generateRandomWeeklyPlan } from './domain/autoPlanner';
 import { addDays, formatDisplayDate, getWeekStart } from './domain/dates';
 import {
@@ -41,7 +41,7 @@ export default function App() {
   const [plan, setPlan] = useState<WeeklyPlan>(() => createEmptyPlan(getWeekStart()));
   const [query, setQuery] = useState('');
   const [activeRecipeId, setActiveRecipeId] = useState<string | null>(null);
-  const [status, setStatus] = useState('Cargando catálogo...');
+  const [status, setStatus] = useState('Conecta Google para cargar el catálogo privado');
   const [isBusy, setIsBusy] = useState(false);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [planStore, setPlanStore] = useState<PlanStoreMeta | null>(null);
@@ -50,17 +50,6 @@ export default function App() {
     () => createGoogleSheetsPlanClient(appConfig.googleApiKey),
     [],
   );
-
-  useEffect(() => {
-    loadCatalog(appConfig.recipesCsvUrl, appConfig.ingredientsCsvUrl)
-      .then((loadedCatalog) => {
-        setCatalog(loadedCatalog);
-        setActiveRecipeId(loadedCatalog.recipes[0]?.id ?? null);
-        setPlan((currentPlan) => sanitizePlanForCatalog(currentPlan, loadedCatalog));
-        setStatus('Catálogo listo');
-      })
-      .catch((error: Error) => setStatus(error.message));
-  }, []);
 
   useEffect(() => {
     const localPlan = readLocalPlan(plan.weekStart);
@@ -100,17 +89,25 @@ export default function App() {
     try {
       const nextAuthClient = authClient ?? (await createGoogleAuthClient(appConfig.googleClientId));
       const token = await nextAuthClient.getAccessToken();
+      const loadedCatalog = await loadGoogleSheetsCatalog(
+        token,
+        appConfig.googleApiKey,
+        appConfig.recipesCsvUrl,
+        appConfig.ingredientsCsvUrl,
+      );
       const store =
         (await planClient.findPlanStore(token)) ?? (await planClient.createPlanStore(token));
       const remotePlan = await planClient.loadPlan(token, store.spreadsheetId, plan.weekStart);
-      const latestPlan = sanitizePlanForCatalog(mergeLatestPlan(plan, remotePlan), catalog);
+      const latestPlan = sanitizePlanForCatalog(mergeLatestPlan(plan, remotePlan), loadedCatalog);
 
       setAuthClient(nextAuthClient);
       setAccessToken(token);
+      setCatalog(loadedCatalog);
+      setActiveRecipeId(loadedCatalog.recipes[0]?.id ?? null);
       setPlanStore(store);
       persistLocalPlan(latestPlan);
       setPlan(latestPlan);
-      setStatus('Google Drive conectado');
+      setStatus('Catálogo privado y Google Drive conectados');
     } catch (error) {
       setStatus(error instanceof Error ? error.message : 'No se pudo conectar Google');
     } finally {

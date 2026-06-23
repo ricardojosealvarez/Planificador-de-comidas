@@ -31,6 +31,8 @@ jobs:
         env:
           VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
           VITE_GOOGLE_API_KEY: ${{ secrets.VITE_GOOGLE_API_KEY }}
+          VITE_RECIPES_CSV_URL: ${{ vars.VITE_RECIPES_CSV_URL }}
+          VITE_INGREDIENTS_CSV_URL: ${{ vars.VITE_INGREDIENTS_CSV_URL }}
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

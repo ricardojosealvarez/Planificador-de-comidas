@@ -3,8 +3,9 @@ import { parseCsv, type CsvRow } from './csv';
 import { sampleCatalog } from './sampleCatalog';
 
 const CATALOG_CACHE_KEY = 'meal-planner.catalog.v1';
+const GOOGLE_SHEETS_API_BASE_URL = 'https://sheets.googleapis.com/v4/spreadsheets';
 
-export async function loadCatalog(
+export async function loadPublicCatalog(
   recipesCsvUrl: string,
   ingredientsCsvUrl: string,
 ): Promise<Catalog> {
@@ -36,6 +37,55 @@ export async function loadCatalog(
   }
 }
 
+export async function loadGoogleSheetsCatalog(
+  accessToken: string,
+  apiKey: string,
+  recipesSheetUrl: string,
+  ingredientsSheetUrl: string,
+): Promise<Catalog> {
+  if (!recipesSheetUrl || !ingredientsSheetUrl) {
+    return sampleCatalog;
+  }
+
+  try {
+    const recipesRef = parseGoogleSheetReference(recipesSheetUrl);
+    const ingredientsRef = parseGoogleSheetReference(ingredientsSheetUrl);
+
+    if (recipesRef.spreadsheetId !== ingredientsRef.spreadsheetId) {
+      throw new Error('Las hojas de recetas e ingredientes deben pertenecer al mismo fichero');
+    }
+
+    const sheetNames = await loadSheetNamesByGid(accessToken, apiKey, recipesRef.spreadsheetId);
+    const recipesSheetName = sheetNames.get(recipesRef.gid);
+    const ingredientsSheetName = sheetNames.get(ingredientsRef.gid);
+
+    if (!recipesSheetName || !ingredientsSheetName) {
+      throw new Error('No se encontraron las pestañas del catálogo en Google Sheets');
+    }
+
+    const [recipesValues, ingredientsValues] = await Promise.all([
+      loadSheetValues(accessToken, apiKey, recipesRef.spreadsheetId, recipesSheetName),
+      loadSheetValues(accessToken, apiKey, ingredientsRef.spreadsheetId, ingredientsSheetName),
+    ]);
+
+    const catalog = normalizeCatalog({
+      recipes: mapSheetRows(recipesValues).map(mapRecipe),
+      ingredients: mapSheetRows(ingredientsValues).map(mapIngredient),
+    });
+
+    localStorage.setItem(CATALOG_CACHE_KEY, JSON.stringify(catalog));
+    return catalog;
+  } catch (error) {
+    const cachedCatalog = readCachedCatalog();
+
+    if (cachedCatalog) {
+      return cachedCatalog;
+    }
+
+    throw error;
+  }
+}
+
 function fetchText(url: string): Promise<string> {
   return fetch(url).then((response) => {
     if (!response.ok) {
@@ -44,6 +94,93 @@ function fetchText(url: string): Promise<string> {
 
     return response.text();
   });
+}
+
+async function loadSheetNamesByGid(
+  accessToken: string,
+  apiKey: string,
+  spreadsheetId: string,
+): Promise<Map<string, string>> {
+  const response = await googleFetch<SpreadsheetMetadataResponse>(
+    `${GOOGLE_SHEETS_API_BASE_URL}/${spreadsheetId}?fields=sheets.properties(sheetId,title)&key=${encodeURIComponent(apiKey)}`,
+    accessToken,
+  );
+
+  return new Map(
+    response.sheets.map((sheet) => [String(sheet.properties.sheetId), sheet.properties.title]),
+  );
+}
+
+async function loadSheetValues(
+  accessToken: string,
+  apiKey: string,
+  spreadsheetId: string,
+  sheetName: string,
+): Promise<string[][]> {
+  const range = encodeURIComponent(`'${sheetName.replace(/'/g, "''")}'`);
+  const response = await googleFetch<SheetValuesResponse>(
+    `${GOOGLE_SHEETS_API_BASE_URL}/${spreadsheetId}/values/${range}?key=${encodeURIComponent(apiKey)}`,
+    accessToken,
+  );
+
+  return response.values ?? [];
+}
+
+async function googleFetch<TResponse>(url: string, accessToken: string): Promise<TResponse> {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Google Sheets error ${response.status}: ${await response.text()}`);
+  }
+
+  return (await response.json()) as TResponse;
+}
+
+function parseGoogleSheetReference(url: string): GoogleSheetReference {
+  const spreadsheetIdMatch = url.match(/\/spreadsheets\/d\/([^/]+)/);
+  const gid = new URL(url).searchParams.get('gid');
+
+  if (!spreadsheetIdMatch?.[1] || !gid) {
+    throw new Error('La URL del catálogo debe ser una URL de Google Sheets con gid');
+  }
+
+  return {
+    spreadsheetId: spreadsheetIdMatch[1],
+    gid,
+  };
+}
+
+function mapSheetRows(values: readonly (readonly string[])[]): CsvRow[] {
+  const [headers, ...rows] = values;
+
+  if (!headers) {
+    return [];
+  }
+
+  const normalizedHeaders = headers.map(normalizeHeader);
+
+  return rows
+    .filter((row) => row.some((cell) => cell.trim().length > 0))
+    .map((row) =>
+      normalizedHeaders.reduce<CsvRow>((record, header, index) => {
+        record[header] = row[index]?.trim() ?? '';
+        return record;
+      }, {}),
+    );
+}
+
+function normalizeHeader(header: string): string {
+  return header
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/(^_|_$)/g, '');
 }
 
 function mapRecipe(row: CsvRow): Recipe {
@@ -198,4 +335,24 @@ function normalizeCatalog(catalog: Catalog): Catalog {
       category: ingredient.category ?? '',
     })),
   };
+}
+
+interface GoogleSheetReference {
+  readonly spreadsheetId: string;
+  readonly gid: string;
+}
+
+interface SpreadsheetMetadataResponse {
+  readonly sheets: readonly SpreadsheetSheet[];
+}
+
+interface SpreadsheetSheet {
+  readonly properties: {
+    readonly sheetId: number;
+    readonly title: string;
+  };
+}
+
+interface SheetValuesResponse {
+  readonly values?: string[][];
 }

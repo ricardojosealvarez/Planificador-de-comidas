@@ -1,6 +1,7 @@
 import type { GoogleTokenClient, GoogleTokenResponse } from './googleTypes';
 
 export const GOOGLE_DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+export const GOOGLE_SPREADSHEETS_SCOPE = 'https://www.googleapis.com/auth/spreadsheets';
 
 const GOOGLE_IDENTITY_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
 
@@ -25,7 +26,7 @@ export async function createGoogleAuthClient(clientId: string): Promise<GoogleAu
           tokenClient ??
           google.accounts.oauth2.initTokenClient({
             client_id: clientId,
-            scope: GOOGLE_DRIVE_FILE_SCOPE,
+            scope: `${GOOGLE_DRIVE_FILE_SCOPE} ${GOOGLE_SPREADSHEETS_SCOPE}`,
             callback: (response: GoogleTokenResponse) => {
               if (response.error || !response.access_token) {
                 reject(new Error(response.error ?? 'No se pudo obtener token de Google'));
